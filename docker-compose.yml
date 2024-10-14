@@ -1,0 +1,124 @@
+services:
+  flask-app:
+    build:
+      context: ./app/       # Path to the directory containing the Dockerfile and other build context files
+      dockerfile: Dockerfile  #
+    ports:
+      - "8092:5000"
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+
+  opcrouter5:
+    image: opcrouter/runtime:latest
+    container_name: opcrouter5
+    environment:
+      - OR_I_ACCEPT_EULA=true
+      - INITIAL_USERNAME=admin
+      - INITIAL_PASSWORD=admin
+      - TZ=Europe/Berlin
+    ports:
+      - "8091:8080"        # OPC Router Web Interface
+      - "1234:80"          # Example port for HTTP
+      - "49421:49420"      # Example OPC UA communication port
+    volumes:
+      - opc-router-5-db:/data/database
+      - opc-router-5-userdata:/inray
+      - opc-router5-logs:/var/log/opcrouter
+    restart: always
+    networks:
+      - app-network
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    command: ["mongod", "--bind_ip", "0.0.0.0"]  # Allow MongoDB to be accessed from outside Docker
+    volumes:
+      - mongodb_data:/data/db
+      - ./init:/docker-entrypoint-initdb.d  # Mount the init directory
+    ports:
+      - "27018:27017"  # External port 27018 mapped to internal port 27017
+    networks:
+      - app-network
+  
+  mongo_express:
+    image: mongo-express
+    container_name: mongo_express
+    restart: always
+    ports:
+      - 18081:8081
+    environment:
+      WAIT_HOSTS: mongodb:27017
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: example
+      ME_CONFIG_BASICAUTH_USERNAME: root
+      ME_CONFIG_BASICAUTH_PASSWORD: example
+      ME_CONFIG_MONGODB_URL: mongodb://root:example@mongodb:27017/
+    networks:
+      - app-network
+
+  mongo-exporter:
+    image: bitnami/mongodb-exporter:latest
+    container_name: mongo-exporter
+    depends_on:
+    - mongodb
+    command:
+      - '--collector.topmetrics'
+      - '--collector.currentopmetrics'
+      - '--collector.replicasetstatus'
+      - '--collector.dbstatsfreestorage'
+      - '--collector.collstats'
+      - '--collector.indexstats'
+      - '--discovering-mode'
+      - '--mongodb.global-conn-pool'
+      - '--collector.dbstats'
+      - '--collector.diagnosticdata'	
+      - '--collector.profile'
+      - '--mongodb.global-conn-pool'
+      - '--mongodb.collstats-colls=admin.companies'
+    environment:
+      MONGODB_URI: "mongodb://root:example@mongodb:27017"
+      
+    ports:
+      - 9216:9216
+    networks:
+      - app-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - 9090:9090
+    networks:
+      -  app-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - app-network
+
+volumes:
+  mongodb_data:
+  opc-router-5-db:
+  opc-router-5-userdata:
+  opc-router5-logs:
+  grafana_data:
+
+
+networks:
+  app-network:
+    driver: bridge
